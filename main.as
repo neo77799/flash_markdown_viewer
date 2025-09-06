@@ -3,6 +3,8 @@
 // - 同期: .md/.txt を取得 → 生テキスト表示 → 箱レイアウト描画（見出し/段落/箇条書き/引用/コード/画像）
 // - 画像: ![alt](url) を検出して読み込み、横幅に合わせて自動縮小（最大高さ 360px / 拡大なし）
 // - 引用: 連続する '>' 行を1つの枠にまとめ、インデントで右に寄せる
+// - インライン: **bold** を太字、`code` を灰色チップで表示
+// - 見出し: H1/H2/H3 に下線スタイルを追加
 // - スクロール: ドラッグ / トラッククリック / （対応環境なら）マウスホイール
 // ================================================================================================
 
@@ -82,18 +84,18 @@ var MD_STYLE = {
   padBox: 6,
   marginY: 8,
 
-  // ↓追加：見出しの下線スタイル
-  colorHeadRule: 0xE6E6E6,  // 線色
-  h1RuleThick: 2,           // H1の太さ
-  h2RuleThick: 1,           // H2の太さ
-  h3RuleThick: 1,           // H3の太さ
-  h1RuleGapTop: 8,          // 見出し→線の間
-  h1RuleGapBottom: 10,      // 線→本文の間
+  // 見出しの下線スタイル
+  colorHeadRule: 0xE6E6E6,
+  h1RuleThick: 2,
+  h2RuleThick: 1,
+  h3RuleThick: 1,
+  h1RuleGapTop: 8,
+  h1RuleGapBottom: 10,
   h2RuleGapTop: 6,
   h2RuleGapBottom: 8,
   h3RuleGapTop: 6,
   h3RuleGapBottom: 6,
-  h3RuleWidthRatio: 1.0     // H3の線の長さ（1.0=全幅, 0.5=半分だけ）
+  h3RuleWidthRatio: 1.0
 };
 
 var __md_rootDepth = 5000; // viewport container depth (fixed)
@@ -103,30 +105,13 @@ var __lastView = {x:0,y:0,w:0,h:0};
 function mdTrim(s){var i=0,j=s.length-1;while(i<=j&&(s.charAt(i)==" "||s.charAt(i)=="\t"))i++;while(j>=i&&(s.charAt(j)==" "||s.charAt(j)=="\t"))j--;return s.substring(i,j+1);}
 function mdIsRule(t){var c=null,cnt=0;for(var i=0;i<t.length;i++){var ch=t.charAt(i);if(ch==" "||ch=="\t")continue;if(c==null){if(ch=="-"||ch=="*"){c=ch;cnt++;}else{return false;}}else{if(ch==c)cnt++;else return false;}}return(cnt>=3);}
 
-// ---- 引用ヘルパ（追加） ----
+// ---- 引用ヘルパ ----
 function mdLeadSpaces(s){
-  var i=0;
-  while (i<s.length){
-    var ch = s.charAt(i);
-    if (ch==" ") i++;
-    else if (ch=="\t") i += 2; // タブは2相当
-    else break;
-  }
-  return i;
+  var i=0; while (i<s.length){ var ch=s.charAt(i); if (ch==" ") i++; else if (ch=="\t") i+=2; else break; } return i;
 }
-function mdIndentLevel(s){
-  var sp = mdLeadSpaces(s);
-  return Math.floor(sp/2); // 2スペースで1レベル
-}
-function mdIsQuoteLine(s){
-  var i = mdLeadSpaces(s);
-  return (s.charAt(i)==">");
-}
-function mdStripQuoteMarker(s){
-  var i = mdLeadSpaces(s);
-  if (s.charAt(i)==">") i++;
-  return mdTrim(s.substr(i));
-}
+function mdIndentLevel(s){ var sp=mdLeadSpaces(s); return Math.floor(sp/2); } // 2スペースで1レベル
+function mdIsQuoteLine(s){ var i=mdLeadSpaces(s); return (s.charAt(i)==">"); }
+function mdStripQuoteMarker(s){ var i=mdLeadSpaces(s); if (s.charAt(i)==">") i++; return mdTrim(s.substr(i)); }
 
 // --- viewport helpers ---
 function killOldViewport(){
@@ -134,7 +119,6 @@ function killOldViewport(){
   if (_root.mdMask){ _root.mdMask.removeMovieClip(); }
   if (_root.mdScroll){ _root.mdScroll.removeMovieClip(); }
 }
-
 function createViewport(x, y, w, h){
   killOldViewport();
   _root.createEmptyMovieClip("mdView", __md_rootDepth);
@@ -149,7 +133,6 @@ function createViewport(x, y, w, h){
   v.createEmptyMovieClip("content", 1);
   return v;
 }
-
 function refreshScrollbar(){
   if (!_root.mdView) return;
   var v = _root.mdView;
@@ -175,7 +158,6 @@ function installScrollbar(viewX, viewY, viewW, viewH, contentH){
     endFill();
     useHandCursor = false;
   }
-
   // thumb
   var thMin = 20;
   var thH = (contentH <= viewH) ? trackH : Math.max(thMin, Math.floor(viewH*viewH/contentH));
@@ -242,8 +224,127 @@ function installScrollbar(viewX, viewY, viewW, viewH, contentH){
   if (contentH <= viewH) contentClip._y = 0;
 }
 
+// ==================== Inline（**bold**, `code`） ====================
+// トークン化
+function mdParseInline(s){
+  var out = new Array();
+  var i=0, n=s.length;
+  while(i<n){
+    var ch = s.charAt(i);
+
+    // `code`
+    if (ch=="`"){
+      var j = s.indexOf("`", i+1);
+      if (j>i){
+        out.push({t:"code", v:s.substring(i+1, j)});
+        i = j+1; continue;
+      }
+    }
+
+    // **bold**
+    if (ch=="*" && i+1<n && s.charAt(i+1)=="*"){
+      var j2 = s.indexOf("**", i+2);
+      if (j2>i){
+        out.push({t:"bold", v:s.substring(i+2, j2)});
+        i = j2+2; continue;
+      }
+    }
+
+    // 通常テキストをスペース境界で分割
+    var start=i;
+    while(i<n){
+      ch = s.charAt(i);
+      if (ch=="`") break;
+      if (ch=="*" && i+1<n && s.charAt(i+1)=="*") break;
+      if (ch==" "){
+        if (i>start) out.push({t:"text", v:s.substring(start,i)});
+        out.push({t:"space", v:" "});
+        i++; start=i;
+        break;
+      }
+      i++;
+    }
+    if (i==n && i>start) out.push({t:"text", v:s.substring(start,i)});
+  }
+  if (out.length==0) out.push({t:"text", v:s});
+  return out;
+}
+
+// レンダラー（横流し → 折り返し）
+function renderInlineBlock(mc, text, maxW, baseSize){
+  var tokens = mdParseInline(text);
+
+  // 測定用TF
+  var measName = "_meas";
+  mc.createTextField(measName, 32000, -2000, -2000, 4, 4);
+  var meas = mc[measName];
+  meas.autoSize = true; meas.multiline = false; meas.wordWrap = false; meas.selectable = false; meas.border = false; meas.background = false; meas.embedFonts = false;
+
+  function measureWord(txt, bold, mono){
+    var f = new TextFormat();
+    f.font = mono ? MD_STYLE.fontMono : MD_STYLE.fontBody;
+    f.size = baseSize; f.bold = !!bold; f.color = MD_STYLE.colorText;
+    meas.setNewTextFormat(f); meas.defaultTextFormat = f; meas.text = txt;
+    return { w: meas._width, h: meas._height };
+  }
+
+  var x=0, y=0, lineH=0, leading=4;
+  var seq = 0; function nn(p){ var s=p+seq; seq++; return s; }
+
+  for (var i=0; i<tokens.length; i++){
+    var tk = tokens[i];
+
+    if (tk.t=="space"){
+      var m = measureWord(" ", false, false);
+      if (x + m.w > maxW && x>0){ x=0; y += lineH + leading; lineH=0; }
+      var nm = nn("sp");
+      mc.createTextField(nm, 1000+seq, x, y, 4, 4);
+      var sp = mc[nm];
+      sp.autoSize = true; sp.text = " ";
+      var fsp = new TextFormat(); fsp.font = MD_STYLE.fontBody; fsp.size = baseSize; fsp.color = MD_STYLE.colorText;
+      sp.setNewTextFormat(fsp); sp.defaultTextFormat = fsp;
+      x += m.w; if (m.h>lineH) lineH=m.h;
+      continue;
+    }
+
+    if (tk.t=="code"){
+      var padX=4, padY=2;
+      var m2 = measureWord(tk.v, false, true);
+      var bw = m2.w + padX*2; var bh = m2.h + padY*2;
+      if (x + bw > maxW && x>0){ x=0; y += lineH + leading; lineH=0; }
+
+      var nm2 = nn("code");
+      mc.createEmptyMovieClip(nm2, 2000+seq);
+      var chip = mc[nm2];
+      chip._x = x; chip._y = y;
+      chip.beginFill(0xF0F0F0, 100); chip.lineStyle(1, 0xDDDDDD, 100);
+      chip.moveTo(0,0); chip.lineTo(bw,0); chip.lineTo(bw,bh); chip.lineTo(0,bh); chip.lineTo(0,0); chip.endFill();
+      chip.createTextField("t", 1, padX, padY, 4, 4);
+      var tt = chip.t; tt.autoSize=true; tt.multiline=false; tt.wordWrap=false; tt.selectable=true; tt.border=false; tt.background=false; tt.embedFonts=false;
+      var fmtc = new TextFormat(); fmtc.font = MD_STYLE.fontMono; fmtc.size = baseSize; fmtc.color = 0x333333;
+      tt.setNewTextFormat(fmtc); tt.defaultTextFormat = fmtc; tt.text = tk.v;
+
+      x += bw; if (bh>lineH) lineH=bh;
+      continue;
+    }
+
+    // text / bold
+    var isBold = (tk.t=="bold");
+    var m3 = measureWord(tk.v, isBold, false);
+    if (x + m3.w > maxW && x>0){ x=0; y += lineH + leading; lineH=0; }
+    var nm3 = nn("w");
+    mc.createTextField(nm3, 3000+seq, x, y, 4, 4);
+    var tf = mc[nm3]; tf.autoSize = true; tf.multiline=false; tf.wordWrap=false; tf.selectable=true; tf.border=false; tf.background=false; tf.embedFonts=false;
+    var fmt = new TextFormat(); fmt.font = MD_STYLE.fontBody; fmt.size = baseSize; fmt.bold = isBold; fmt.color = MD_STYLE.colorText;
+    tf.setNewTextFormat(fmt); tf.defaultTextFormat = fmt; tf.text = tk.v;
+
+    x += m3.w; if (m3.h>lineH) lineH=m3.h;
+  }
+
+  return y + lineH;
+}
+
 // --- renderer entry ---
-// md: text, (x,y): viewport origin, w: viewport width, h: viewport height
 function renderMarkdownBlocks(md, x, y, w, h){
   __lastView = {x:x,y:y,w:w,h:h};
   var view = createViewport(x, y, w, h);
@@ -279,57 +380,54 @@ function renderMarkdownBlocks(md, x, y, w, h){
   }
 
   function addHeading(txt, level){
-    // フォントサイズ
     var size = (level==1)?24:(level==2)?20:(level==3)?18:(level==4)?16:(level==5)?14:13;
-  
-    // 見出しテキスト
+
     var tfh = tfMake(panel, "h"+nd(), 0, curY, w, txt, MD_STYLE.fontHead, size, true, false);
-    curY += tfh._height;  // テキスト分の高さを進める
-  
-    // ---- 下線（レベル別スタイル） ----
+    curY += tfh._height;
+
+    // 下線
     var thick, gapTop, gapBottom, lineW;
     if (level==1){
       thick = MD_STYLE.h1RuleThick; gapTop = MD_STYLE.h1RuleGapTop; gapBottom = MD_STYLE.h1RuleGapBottom; lineW = w;
     }else if (level==2){
       thick = MD_STYLE.h2RuleThick; gapTop = MD_STYLE.h2RuleGapTop; gapBottom = MD_STYLE.h2RuleGapBottom; lineW = w;
-    }else{ // level >= 3
+    }else{
       thick = MD_STYLE.h3RuleThick; gapTop = MD_STYLE.h3RuleGapTop; gapBottom = MD_STYLE.h3RuleGapBottom;
-      lineW = Math.round(w * MD_STYLE.h3RuleWidthRatio);  // 例: 1.0なら全幅
+      lineW = Math.round(w * MD_STYLE.h3RuleWidthRatio);
     }
-  
-    // 見出し下の余白 → 線
     var id = nd(), nm = "hru"+id;
     panel.createEmptyMovieClip(nm, id);
-    var ru = panel[nm];
-    ru._x = 0;
-    ru._y = curY + gapTop;
+    var ru = panel[nm]; ru._x = 0; ru._y = curY + gapTop;
     ru.lineStyle(thick, MD_STYLE.colorHeadRule, 100);
-    ru.moveTo(0, 0);
-    ru.lineTo(lineW, 0);
-  
-    // 線の下の余白を加算
+    ru.moveTo(0,0); ru.lineTo(lineW, 0);
     curY += gapTop + gapBottom;
   }
 
-
+  // 段落（インライン描画）
   function addParagraph(txt){
-    var tfp = tfMake(panel, "p"+nd(), 0, curY, w, txt, MD_STYLE.fontBody, 12, false, false);
-    curY += tfp._height + MD_STYLE.marginY;
+    var id = nd(), nm = "p"+id;
+    panel.createEmptyMovieClip(nm, id);
+    var blk = panel[nm];
+    var hUsed = renderInlineBlock(blk, txt, w, 12);
+    blk._y = curY;
+    curY += hUsed + MD_STYLE.marginY;
   }
 
-  // 引用（インデント対応・連結済テキスト）
+  // 引用（インライン・インデント）
   function addQuote(txt, indent){
-    var pad = MD_STYLE.padBox;
-    var leftShift = indent * 16;        // インデント幅
-    var widthQ = w - leftShift;         // ボックス幅
     var id = nd(), nm = "q"+id;
     panel.createEmptyMovieClip(nm, id);
-    var box = panel[nm];
+    var box = panel[nm]; var pad = MD_STYLE.padBox;
 
-    var innerW = widthQ - pad*2 - 4;
-    var t = tfMake(box, "t", pad+8, pad, innerW, txt, MD_STYLE.fontBody, 12, false, false);
-    var boxH = t._height + pad*2;
+    var leftShift = indent * 16;
+    var widthQ = w - leftShift;
 
+    var flow = box.createEmptyMovieClip("flow", 1);
+    flow._x = pad + 8; flow._y = pad;
+    var innerW = widthQ - pad*2 - 8;
+    var hUsed = renderInlineBlock(flow, txt, innerW, 12);
+
+    var boxH = hUsed + pad*2;
     box.beginFill(MD_STYLE.colorQuoteBg, 100);
     box.lineStyle(1, MD_STYLE.colorBorder, 100);
     box.moveTo(0,0); box.lineTo(widthQ,0); box.lineTo(widthQ, boxH); box.lineTo(0, boxH); box.lineTo(0,0); box.endFill();
@@ -359,24 +457,40 @@ function renderMarkdownBlocks(md, x, y, w, h){
     var id = nd(), nm = "li"+id;
     panel.createEmptyMovieClip(nm, id);
     var blk = panel[nm]; var leftPad = 14 + indent*16;
-    var t = tfMake(blk, "t"+id, leftPad, 0, w - leftPad, txt, MD_STYLE.fontBody, 12, false, false);
-    var h = t._height;
+
+    // マーカー
     blk.beginFill(MD_STYLE.colorText, 100);
-    var yb = Math.max(4, (h-4)/2);
-    blk.moveTo(leftPad-10, yb); blk.lineTo(leftPad-6, yb); blk.lineTo(leftPad-6, yb+4); blk.lineTo(leftPad-10, yb+4); blk.lineTo(leftPad-10, yb);
+    blk.moveTo(leftPad-10, 6); blk.lineTo(leftPad-6, 6); blk.lineTo(leftPad-6, 10); blk.lineTo(leftPad-10, 10); blk.lineTo(leftPad-10, 6);
     blk.endFill();
-    blk._y = curY; curY += h + 4;
+
+    // 本文（インライン）
+    var flow = blk.createEmptyMovieClip("flow", 1);
+    flow._x = leftPad; flow._y = 0;
+    var hUsed = renderInlineBlock(flow, txt, w - leftPad, 12);
+
+    blk._y = curY; curY += hUsed + 4;
   }
 
   function addOrdered(prefix, txt, indent){
     var id = nd(), nm = "ol"+id;
     panel.createEmptyMovieClip(nm, id);
     var blk = panel[nm]; var leftPad = 8 + indent*16;
-    var p = tfMake(blk, "p"+id, leftPad, 0, 22, prefix + ".", MD_STYLE.fontBody, 12, true, false);
-    var t = tfMake(blk, "t"+id, leftPad + 22, 0, w - (leftPad + 22), txt, MD_STYLE.fontBody, 12, false, false);
-    var h = Math.max(p._height, t._height);
-    p._height = h; t._height = h;
-    blk._y = curY; curY += h + 4;
+
+    // 番号
+    blk.createTextField("num", 1, leftPad, 0, 22, 20);
+    var p = blk.num; p.autoSize=true; p.multiline=false; p.wordWrap=false; p.border=false; p.background=false;
+    var f = new TextFormat(); f.font = MD_STYLE.fontBody; f.size = 12; f.bold=true; f.color = MD_STYLE.colorText;
+    p.setNewTextFormat(f); p.defaultTextFormat=f; p.text = prefix + ".";
+    var nW = p._width;
+
+    // 本文（インライン）
+    var flow = blk.createEmptyMovieClip("flow", 2);
+    flow._x = leftPad + nW + 6; flow._y = 0;
+    var hUsed = renderInlineBlock(flow, txt, w - (leftPad + nW + 6), 12);
+
+    var hAll = Math.max(p._height, hUsed);
+    p._height = hAll;
+    blk._y = curY; curY += hAll + 4;
   }
 
   // 画像（loadMovie + polling + ログ）
@@ -480,7 +594,7 @@ function renderMarkdownBlocks(md, x, y, w, h){
       }
     }
 
-    // ====== 引用：連続する '>' を一つにまとめる + インデント反映 ======
+    // 引用: 連続 '>' をまとめる（インデント別枠）
     if (mdIsQuoteLine(line)){
       var ind = mdIndentLevel(line);
       var qbuf = mdStripQuoteMarker(line);
@@ -488,7 +602,7 @@ function renderMarkdownBlocks(md, x, y, w, h){
       while (j < L.length){
         var ln2 = L[j];
         if (!mdIsQuoteLine(ln2)) break;
-        if (mdIndentLevel(ln2) != ind) break; // インデント違いは別枠
+        if (mdIndentLevel(ln2) != ind) break;
         var part = mdStripQuoteMarker(ln2);
         qbuf += (part.length ? ("\n"+part) : "\n");
         j++;
@@ -524,13 +638,8 @@ lv.onData = function(raw){
   if (raw == undefined){ log("load error or CORS blocked."); return; }
   log("loaded " + raw.length + " bytes.");
 
-  // raw text 表示（デバッグ用）
-  tfPreview.html = false; tfPreview.text = raw;
-
-  // 箱レイアウト + スクロール
+  tfPreview.html = false; tfPreview.text = raw;   // デバッグ用の生テキスト
   renderMarkdownBlocks(raw, tfPreview._x, tfPreview._y, tfPreview._width, tfPreview._height);
-
-  // 生テキスト欄は非表示に
   tfPreview._visible = false;
 };
 
