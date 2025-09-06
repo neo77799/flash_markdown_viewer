@@ -10,7 +10,7 @@
 
 System.useCodepage = false;                 // UTF-8 想定
 var FONT_FACE  = "MS UI Gothic";            // Ruffleなら "Noto Sans JP"
-var DEFAULT_URL = "https://hackmd.io/K8krp0A0QqGS0ECO4URDsg.md"; // 空欄時のフォールバック
+var DEFAULT_URL = "https://gist.githubusercontent.com/neo77799/9277e1556264b9f334aa02427bf2e97c/raw/f50d54ff963485097a96304e004fb210d4479b22/AS_sample.md"; // 空欄時のフォールバック
 
 // ------------ depth manager ------------
 var __d = 1; function nextDepth(){ var d=__d; __d++; return d; }
@@ -505,7 +505,7 @@ function renderMarkdownBlocks(md, x, y, w, h){
     box.pic._x = pad; box.pic._y = pad;
 
     var cap = tfMake(box, "cap"+id, pad, pad, innerW,
-                     (alt && alt.length ? alt : "loading image..."),
+                     (alt && alt.length ? alt : " "),
                      MD_STYLE.fontBody, 12, false, false);
     cap.textColor = 0x666666;
     cap._y = pad + 140 + 4;
